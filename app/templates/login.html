@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>管理员登录 · Update Relay</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="center-wrap">
+    <section class="auth-card" aria-labelledby="login-title">
+      <h1 id="login-title">管理员登录</h1>
+      <p class="hint" style="margin-block-end: 1rem;">登录 Update Relay 管理白名单仓库与本地缓存。</p>
+
+      {% if error %}
+      <div class="error-banner" role="alert">{{ error }}</div>
+      {% endif %}
+
+      <form method="POST" action="/admin/login">
+        <div class="field" style="margin-block-end: 1rem;">
+          <label for="username">管理员账号</label>
+          <input
+            type="text"
+            id="username"
+            name="username"
+            autocomplete="username"
+            autocorrect="off"
+            autocapitalize="none"
+            spellcheck="false"
+            enterkeyhint="next"
+            required
+            autofocus
+          >
+        </div>
+
+        <div class="field" style="margin-block-end: 1.25rem;">
+          <label for="current-password">管理员密码</label>
+          <div class="password-wrap">
+            <input
+              type="password"
+              id="current-password"
+              name="password"
+              autocomplete="current-password"
+              enterkeyhint="done"
+              required
+            >
+            <button
+              type="button"
+              id="toggle-password"
+              aria-pressed="false"
+              aria-label="显示密码"
+            >显示</button>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-primary" style="width: 100%;">登录后台</button>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    const pwInput = document.getElementById('current-password');
+    const toggleBtn = document.getElementById('toggle-password');
+    toggleBtn.addEventListener('click', () => {
+      const showing = pwInput.type === 'text';
+      pwInput.type = showing ? 'password' : 'text';
+      toggleBtn.setAttribute('aria-pressed', String(!showing));
+      toggleBtn.textContent = showing ? '显示' : '隐藏';
+      toggleBtn.setAttribute('aria-label', showing ? '显示密码' : '隐藏密码');
+    });
+  </script>
+</body>
+</html>

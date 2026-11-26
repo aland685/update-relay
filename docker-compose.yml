@@ -1,0 +1,16 @@
+services:
+  update-relay:
+    build: .
+    container_name: update-relay
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "18080:18080"
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

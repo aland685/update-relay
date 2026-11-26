@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>管理控制台 · Update Relay</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <h1 class="brand-title">Update Relay</h1>
+        <span class="brand-sub">GitHub Release 按需中转与 1 小时自动清理</span>
+      </div>
+      <div class="topbar-actions">
+        <button type="button" id="refresh-all-btn">刷新面板</button>
+        <button type="button" id="purge-all-btn" class="btn-danger">一键清理全部缓存</button>
+        <form method="POST" action="/admin/logout" style="margin:0;">
+          <button type="submit">退出登录</button>
+        </form>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="stats-strip" aria-label="缓存运行概览">
+      <div class="stat-cell">
+        <div class="stat-label">缓存磁盘占用</div>
+        <div class="stat-value" id="stat-usage">{{ stats.total_mb }} / {{ stats.max_cache_mb }} MB</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-label">已缓存文件数</div>
+        <div class="stat-value" id="stat-files">{{ stats.file_count }}</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-label">清理策略</div>
+        <div class="stat-value" style="font-size: 1rem;">
+          {{ stats.ttl_seconds // 60 }} 分钟 · {{ "滑动续期" if stats.ttl_mode == "sliding" else "固定过期" }}
+        </div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-label">白名单仓库数</div>
+        <div class="stat-value" id="stat-repos">{{ repos | length }}</div>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="add-repo-heading">
+      <h2 id="add-repo-heading" style="margin: 0 0 0.875rem; font-size: 1rem;">添加白名单仓库</h2>
+      <form id="add-repo-form" class="form-row" novalidate>
+        <div class="field">
+          <label for="repo-input">GitHub 仓库（owner/repo）</label>
+          <input
+            type="text"
+            id="repo-input"
+            name="repo"
+            placeholder="例如：aland685/super-start-for-ag"
+            pattern="^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+            autocorrect="off"
+            autocapitalize="none"
+            spellcheck="false"
+            required
+          >
+        </div>
+        <div class="field">
+          <label for="note-input">备注（可选）</label>
+          <input type="text" id="note-input" name="note" placeholder="例如：超星学习通客户端">
+        </div>
+        <button type="submit" class="btn-primary" id="add-repo-submit">添加仓库</button>
+      </form>
+    </section>
+
+    <section aria-labelledby="repos-table-caption">
+      <div tabindex="0" role="region" aria-labelledby="repos-table-caption" class="table-wrapper">
+        <table>
+          <caption id="repos-table-caption" style="text-align: left; padding: 0.75rem 0.875rem; font-weight: 600;">
+            白名单项目与缓存状态
+          </caption>
+          <thead>
+            <tr>
+              <th>仓库与接口</th>
+              <th>状态</th>
+              <th>最新缓存版本</th>
+              <th>已缓存文件（1 小时自动过期）</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="repos-tbody">
+            {% if not repos %}
+            <tr>
+              <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                暂无白名单仓库，请在上方添加 `owner/repo`。
+              </td>
+            </tr>
+            {% endif %}
+            {% for r in repos %}
+            <tr data-repo="{{ r.repo }}">
+              <th>
+                <div style="font-size: 0.95rem;">{{ r.repo }}</div>
+                {% if r.note %}
+                <div class="hint">{{ r.note }}</div>
+                {% endif %}
+                <div style="margin-block-start: 0.4rem;">
+                  <button type="button" class="btn-sm copy-btn" data-copy="{{ r.api_url }}">复制检查更新 API</button>
+                </div>
+              </th>
+              <td>
+                {% if r.enabled %}
+                <span class="badge badge-on">已启用</span>
+                {% else %}
+                <span class="badge badge-off">已禁用</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if r.latest_tag %}
+                <div class="mono">{{ r.latest_tag }}</div>
+                <div class="hint">元数据剩余 {{ r.meta_ttl_remaining }}s</div>
+                {% if r.assets_preview %}
+                <div class="action-group" style="margin-block-start: 0.35rem;">
+                  {% for a in r.assets_preview[:3] %}
+                  <button type="button" class="btn-sm copy-btn" data-copy="{{ a.download_url }}" title="复制 {{ a.name }} 加速链接">
+                    复制 {{ a.name }}
+                  </button>
+                  {% endfor %}
+                </div>
+                {% endif %}
+                {% else %}
+                <span class="hint">尚未拉取</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if r.cached_files %}
+                <ul class="file-list">
+                  {% for f in r.cached_files %}
+                  <li class="file-item">
+                    <div class="file-meta">
+                      <span class="file-name">{{ f.tag }} / {{ f.filename }}</span>
+                      <span class="file-sub">{{ f.size_human }} · 剩余 {{ (f.ttl_remaining_seconds // 60) }} 分钟 ({{ f.ttl_remaining_seconds }}s)</span>
+                    </div>
+                    <div class="action-group">
+                      <button type="button" class="btn-sm copy-btn" data-copy="{{ f.download_url }}">复制直链</button>
+                      <button
+                        type="button"
+                        class="btn-sm btn-danger del-file-btn"
+                        data-repo="{{ r.repo }}"
+                        data-tag="{{ f.tag }}"
+                        data-filename="{{ f.filename }}"
+                      >删除</button>
+                    </div>
+                  </li>
+                  {% endfor %}
+                </ul>
+                {% else %}
+                <span class="hint">暂无本地文件缓存</span>
+                {% endif %}
+              </td>
+              <td>
+                <div class="action-group">
+                  <button
+                    type="button"
+                    class="btn-sm toggle-btn"
+                    data-repo="{{ r.repo }}"
+                    data-next="{{ 'false' if r.enabled else 'true' }}"
+                  >{{ '禁用' if r.enabled else '启用' }}</button>
+                  <button type="button" class="btn-sm refresh-btn" data-repo="{{ r.repo }}">刷新元数据</button>
+                  <button type="button" class="btn-sm purge-repo-btn" data-repo="{{ r.repo }}">清缓存</button>
+                  <button type="button" class="btn-sm btn-danger delete-repo-btn" data-repo="{{ r.repo }}">删除</button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title">
+    <h1 id="confirm-title">确认操作</h1>
+    <p id="confirm-message"></p>
+    <form method="dialog" class="dialog-actions">
+      <button value="cancel" autofocus>取消</button>
+      <button value="confirm" class="btn-danger" id="confirm-ok-btn">确认执行</button>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const toastEl = document.getElementById('toast');
+    let toastTimer = null;
+    function showToast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
+    }
+
+    const confirmDialog = document.getElementById('confirm-dialog');
+    const confirmTitle = document.getElementById('confirm-title');
+    const confirmMessage = document.getElementById('confirm-message');
+    let pendingConfirm = null;
+
+    function askConfirm(title, message, onConfirm) {
+      confirmTitle.textContent = title;
+      confirmMessage.textContent = message;
+      pendingConfirm = onConfirm;
+      confirmDialog.showModal();
+    }
+
+    confirmDialog.addEventListener('close', async () => {
+      const val = confirmDialog.returnValue;
+      confirmDialog.returnValue = '';
+      const fn = pendingConfirm;
+      pendingConfirm = null;
+      if (val === 'confirm' && typeof fn === 'function') {
+        await fn();
+      }
+    });
+
+    async function apiCall(url, options = {}) {
+      const resp = await fetch(url, {
+        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+        ...options,
+      });
+      if (resp.status === 401) {
+        location.reload();
+        return null;
+      }
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(data.detail || `请求失败 (${resp.status})`);
+      }
+      return data;
+    }
+
+    // 添加白名单仓库
+    const addForm = document.getElementById('add-repo-form');
+    const repoInput = document.getElementById('repo-input');
+    const addSubmit = document.getElementById('add-repo-submit');
+
+    repoInput.addEventListener('input', () => repoInput.setCustomValidity(''));
+    addForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!repoInput.checkValidity()) {
+        repoInput.setCustomValidity('请输入有效的 owner/repo 格式，例如 aland685/super-start-for-ag');
+        repoInput.reportValidity();
+        repoInput.focus();
+        return;
+      }
+      addSubmit.disabled = true;
+      try {
+        await apiCall('/api/admin/repos', {
+          method: 'POST',
+          body: JSON.stringify({
+            repo: repoInput.value.trim(),
+            note: document.getElementById('note-input').value.trim(),
+            enabled: true,
+          }),
+        });
+        showToast('已添加仓库，正在刷新...');
+        location.reload();
+      } catch (err) {
+        showToast(err.message);
+      } finally {
+        addSubmit.disabled = false;
+      }
+    });
+
+    document.getElementById('refresh-all-btn').addEventListener('click', () => location.reload());
+
+    document.getElementById('purge-all-btn').addEventListener('click', () => {
+      askConfirm('清理全部缓存', '确定要删除所有已缓存的 Release 文件和元数据吗？', async () => {
+        try {
+          const res = await apiCall('/api/admin/cache/purge', { method: 'POST' });
+          showToast(`已清理 ${res.removed_files} 个缓存文件`);
+          setTimeout(() => location.reload(), 600);
+        } catch (err) {
+          showToast(err.message);
+        }
+      });
+    });
+
+    document.getElementById('repos-tbody').addEventListener('click', async (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+
+      if (btn.classList.contains('copy-btn')) {
+        try {
+          await navigator.clipboard.writeText(btn.dataset.copy);
+          showToast('链接已复制到剪贴板');
+        } catch {
+          showToast('复制失败，请手动复制');
+        }
+        return;
+      }
+
+      const repo = btn.dataset.repo;
+      if (btn.classList.contains('toggle-btn')) {
+        const nextEnabled = btn.dataset.next === 'true';
+        try {
+          await apiCall(`/api/admin/repos/${repo}/toggle`, {
+            method: 'PATCH',
+            body: JSON.stringify({ enabled: nextEnabled }),
+          });
+          location.reload();
+        } catch (err) {
+          showToast(err.message);
+        }
+      } else if (btn.classList.contains('refresh-btn')) {
+        btn.disabled = true;
+        try {
+          const res = await apiCall(`/api/admin/repos/${repo}/refresh`, { method: 'POST' });
+          showToast(`已刷新 ${repo} (${res.tag_name || '完成'})`);
+          setTimeout(() => location.reload(), 500);
+        } catch (err) {
+          showToast(err.message);
+        } finally {
+          btn.disabled = false;
+        }
+      } else if (btn.classList.contains('purge-repo-btn')) {
+        askConfirm('清理项目缓存', `确定要清理 ${repo} 的本地文件与元数据缓存吗？`, async () => {
+          try {
+            const res = await apiCall(`/api/admin/repos/${repo}/cache`, { method: 'DELETE' });
+            showToast(`已清理 ${res.removed_files} 个文件`);
+            setTimeout(() => location.reload(), 500);
+          } catch (err) {
+            showToast(err.message);
+          }
+        });
+      } else if (btn.classList.contains('delete-repo-btn')) {
+        askConfirm('删除白名单仓库', `确定要从白名单中移除 ${repo} 并清理其所有缓存吗？`, async () => {
+          try {
+            await apiCall(`/api/admin/repos/${repo}`, { method: 'DELETE' });
+            location.reload();
+          } catch (err) {
+            showToast(err.message);
+          }
+        });
+      } else if (btn.classList.contains('del-file-btn')) {
+        const { tag, filename } = btn.dataset;
+        try {
+          const qs = new URLSearchParams({ repo, tag, filename }).toString();
+          await apiCall(`/api/admin/cache/file?${qs}`, { method: 'DELETE' });
+          location.reload();
+        } catch (err) {
+          showToast(err.message);
+        }
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Update Relay · 服务状态</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="center-wrap">
+    <section class="auth-card" aria-labelledby="status-title">
+      <h1 id="status-title">Update Relay</h1>
+      <p class="hint" style="margin-block-end: 1rem;">GitHub Release 按需加速与自动清理中转服务正在运行。</p>
+      <div class="stat-cell" style="margin-block-end: 1rem;">
+        <div class="stat-label">服务状态</div>
+        <div class="stat-value" style="font-size: 1rem; color: var(--success);">在线 · 仅限白名单仓库</div>
+      </div>
+      <div class="stat-cell" style="margin-block-end: 1.25rem;">
+        <div class="stat-label">缓存保留策略</div>
+        <div class="stat-value" style="font-size: 0.95rem;">
+          {{ (stats.ttl_seconds // 60) }} 分钟自动清理（{{ "滑动续期" if stats.ttl_mode == "sliding" else "固定时长" }}）
+        </div>
+      </div>
+      <a class="btn btn-primary" href="/admin" style="width: 100%;">进入管理后台</a>
+    </section>
+  </main>
+</body>
+</html>
