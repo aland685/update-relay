@@ -90,6 +90,7 @@ async def fetch_latest_release(
         logger.warning("请求 GitHub API 失败 %s: %s", api_url, exc)
         raise HTTPException(status_code=502, detail=f"请求 GitHub 上游失败: {exc}") from exc
 
+    storage.update_rate_limit(resp.headers)
     if resp.status_code == 404:
         raise HTTPException(status_code=404, detail="仓库尚未发布任何 Release")
     if resp.status_code == 403 and resp.headers.get("x-ratelimit-remaining") == "0":
@@ -147,6 +148,7 @@ async def resolve_asset_upstream_url(
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"校验 Release 资产失败: {exc}") from exc
 
+    storage.update_rate_limit(resp.headers)
     if resp.status_code == 404:
         raise HTTPException(status_code=404, detail="指定的 Release Tag 不存在")
     if resp.status_code >= 400:

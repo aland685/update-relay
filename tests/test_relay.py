@@ -54,6 +54,11 @@ class MockUpstreamState:
                 self.api_calls += 1
                 return httpx.Response(
                     200,
+                    headers={
+                        "x-ratelimit-remaining": "59",
+                        "x-ratelimit-limit": "60",
+                        "x-ratelimit-reset": "1800000000",
+                    },
                     json={
                         "tag_name": "v1.2.3",
                         "name": "v1.2.3",
@@ -73,6 +78,11 @@ class MockUpstreamState:
                 self.api_calls += 1
                 return httpx.Response(
                     200,
+                    headers={
+                        "x-ratelimit-remaining": "59",
+                        "x-ratelimit-limit": "60",
+                        "x-ratelimit-reset": "1800000000",
+                    },
                     json={
                         "tag_name": "v1.2.3",
                         "assets": [
@@ -174,11 +184,27 @@ async def test_api_url_rewrite_and_metadata_cache(tmp_path: Path) -> None:
                 assert r2.headers.get("x-relay-meta-cache") == "HIT"
                 assert upstream.api_calls == 1
 
-                # ?refresh=1 强制刷新
-                r3 = await client.get("/repos/aland685/super-start-for-ag/releases/latest?refresh=1")
+                # 未登录带 ?refresh=1 不能穿透缓存
+                r_unauth_refresh = await client.get("/repos/aland685/super-start-for-ag/releases/latest?refresh=1")
+                assert r_unauth_refresh.status_code == 200
+                assert r_unauth_refresh.headers.get("x-relay-meta-cache") == "HIT"
+                assert upstream.api_calls == 1
+
+                # 管理员带 ?refresh=1 强制刷新
+                r3 = await client.get(
+                    "/repos/aland685/super-start-for-ag/releases/latest?refresh=1",
+                    headers=headers,
+                )
                 assert r3.status_code == 200
                 assert r3.headers.get("x-relay-meta-cache") == "MISS"
                 assert upstream.api_calls == 2
+
+                # 管理员概览接口应包含 GitHub API 剩余额度
+                ov = await client.get("/api/admin/overview", headers=headers)
+                assert ov.status_code == 200
+                rl = ov.json()["github_rate_limit"]
+                assert rl["remaining"] == 59
+                assert rl["limit"] == 60
 
 
 @pytest.mark.asyncio
@@ -305,4 +331,34 @@ async def test_runtime_settings_update_and_persistence(tmp_path: Path) -> None:
         assert app2.state.settings.max_cache_mb == 512
         assert app2.state.settings.cache_ttl_seconds == 1800
         assert app2.state.settings.cache_ttl_mode == "fixed"
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limiter(tmp_path: Path) -> None:
+    cfg = _make_settings(tmp_path)
+    app = create_app(settings=cfg)
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            for i in range(4):
+                r = await client.post(
+                    "/admin/login",
+                    data={"username": "admin", "password": f"wrong-{i}"},
+                    headers={"x-forwarded-for": "203.0.113.10"},
+                )
+                assert r.status_code == 401
+            # 第 5 次失败触发锁定 429
+            r5 = await client.post(
+                "/admin/login",
+                data={"username": "admin", "password": "wrong-5"},
+                headers={"x-forwarded-for": "203.0.113.10"},
+            )
+            assert r5.status_code == 429
+            # 锁定期间即使输入正确密码也被拦截
+            r_locked = await client.post(
+                "/admin/login",
+                data={"username": "admin", "password": cfg.admin_password},
+                headers={"x-forwarded-for": "203.0.113.10"},
+            )
+            assert r_locked.status_code == 429
 

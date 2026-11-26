@@ -17,6 +17,7 @@ class RelayStorage:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self._lock = threading.RLock()
+        self._rate_limit: dict[str, Any] = {}
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -275,3 +276,24 @@ class RelayStorage:
                     """,
                     (key, str(value), now),
                 )
+
+    # ---- GitHub API 速率限制状态 ----
+
+    def update_rate_limit(self, headers: Any) -> None:
+        """从 GitHub API 响应头记录最新速率限制信息。"""
+        rem = headers.get("x-ratelimit-remaining")
+        lim = headers.get("x-ratelimit-limit")
+        rst = headers.get("x-ratelimit-reset")
+        if rem is None and lim is None:
+            return
+        with self._lock:
+            self._rate_limit = {
+                "remaining": int(rem) if rem is not None and str(rem).isdigit() else None,
+                "limit": int(lim) if lim is not None and str(lim).isdigit() else None,
+                "reset": int(rst) if rst is not None and str(rst).isdigit() else None,
+                "updated_at": time.time(),
+            }
+
+    def get_rate_limit(self) -> dict[str, Any]:
+        with self._lock:
+            return dict(self._rate_limit)

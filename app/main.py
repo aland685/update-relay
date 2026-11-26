@@ -36,8 +36,10 @@ from .github_client import (
 from .security import (
     SESSION_COOKIE_NAME,
     SESSION_MAX_AGE,
+    LoginRateLimiter,
     create_session_token,
     get_authenticated_admin,
+    get_client_ip,
     get_external_base_url,
     is_safe_segment,
     is_safe_tag,
@@ -91,6 +93,7 @@ def create_app(
     cfg = settings or Settings.from_env()
     storage = RelayStorage(cfg.db_path)
     singleflight = SingleflightRegistry()
+    login_limiter = LoginRateLimiter()
     templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
     @asynccontextmanager
@@ -213,6 +216,7 @@ def create_app(
 
         return {
             "stats": get_cache_stats(app.state.storage, app.state.settings),
+            "github_rate_limit": app.state.storage.get_rate_limit(),
             "settings": {
                 "max_cache_mb": app.state.settings.max_cache_mb,
                 "cache_ttl_seconds": app.state.settings.cache_ttl_seconds,
@@ -265,16 +269,37 @@ def create_app(
         username: str = Form(...),
         password: str = Form(...),
     ):
-        if not verify_credentials(username, password, app.state.settings):
+        client_ip = get_client_ip(request)
+        locked_for = login_limiter.remaining_lockout(client_ip)
+        if locked_for > 0:
+            msg = f"登录失败次数过多，请在 {locked_for} 秒后重试。"
             if "application/json" in request.headers.get("accept", ""):
-                raise HTTPException(status_code=401, detail="用户名或密码错误")
+                raise HTTPException(status_code=429, detail=msg)
             return templates.TemplateResponse(
                 request=request,
                 name="login.html",
-                context={"error": "用户名或密码错误，请重试。"},
-                status_code=401,
+                context={"error": msg},
+                status_code=429,
             )
 
+        if not verify_credentials(username, password, app.state.settings):
+            lock_sec = login_limiter.record_failure(client_ip)
+            msg = (
+                f"连续失败次数过多，已锁定 {lock_sec} 秒。"
+                if lock_sec > 0
+                else "用户名或密码错误，请重试。"
+            )
+            status = 429 if lock_sec > 0 else 401
+            if "application/json" in request.headers.get("accept", ""):
+                raise HTTPException(status_code=status, detail=msg)
+            return templates.TemplateResponse(
+                request=request,
+                name="login.html",
+                context={"error": msg},
+                status_code=status,
+            )
+
+        login_limiter.reset(client_ip)
         token = create_session_token(username, app.state.settings)
         resp = RedirectResponse(url="/admin", status_code=303)
         resp.set_cookie(
@@ -449,13 +474,14 @@ def create_app(
         if not app.state.storage.is_repo_enabled(normalized):
             raise HTTPException(status_code=403, detail="该仓库未在白名单中或已禁用")
 
+        is_admin = get_authenticated_admin(request, app.state.settings) is not None
         payload, from_cache = await fetch_latest_release(
             app.state.http_client,
             app.state.storage,
             app.state.settings,
             owner,
             repo,
-            force_refresh=(refresh == 1),
+            force_refresh=(refresh == 1 and is_admin),
         )
         base_url = get_external_base_url(request, app.state.settings)
         rewritten = rewrite_release_urls(payload, owner, repo, base_url)

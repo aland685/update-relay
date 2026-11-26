@@ -43,6 +43,16 @@
         <div class="stat-label">白名单仓库数</div>
         <div class="stat-value" id="stat-repos">{{ repos | length }}</div>
       </div>
+      <div class="stat-cell">
+        <div class="stat-label">GitHub API 剩余额度</div>
+        <div class="stat-value" id="stat-ratelimit" style="font-size: 1rem;">
+          {% if github_rate_limit and github_rate_limit.remaining is not none %}
+            {{ github_rate_limit.remaining }} / {{ github_rate_limit.limit }}
+          {% else %}
+            暂无记录（未触发回源）
+          {% endif %}
+        </div>
+      </div>
     </section>
 
     <section class="panel" aria-labelledby="policy-heading">

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import hmac
 import re
+import threading
+import time
 from urllib.parse import unquote
 
 from fastapi import Request
@@ -94,3 +96,59 @@ def get_external_base_url(request: Request, settings: Settings) -> str:
     proto = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
     host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc)).split(",")[0].strip()
     return f"{proto}://{host}".rstrip("/")
+
+
+def get_client_ip(request: Request) -> str:
+    """提取客户端真实 IP（优先读取反代头）。"""
+    xff = request.headers.get("x-forwarded-for", "").strip()
+    if xff:
+        return xff.split(",")[0].strip()
+    xri = request.headers.get("x-real-ip", "").strip()
+    if xri:
+        return xri
+    return request.client.host if request.client else "unknown"
+
+
+class LoginRateLimiter:
+    """按 IP 限制管理员登录失败次数，防止暴力破解。"""
+
+    def __init__(
+        self,
+        max_attempts: int = 5,
+        window_seconds: int = 300,
+        lockout_seconds: int = 300,
+    ) -> None:
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self.lockout_seconds = lockout_seconds
+        self._lock = threading.Lock()
+        self._failures: dict[str, list[float]] = {}
+        self._locked_until: dict[str, float] = {}
+
+    def remaining_lockout(self, ip: str, now: float | None = None) -> int:
+        current = now if now is not None else time.time()
+        with self._lock:
+            until = self._locked_until.get(ip, 0.0)
+            if until > current:
+                return int(until - current) + 1
+            if ip in self._locked_until:
+                del self._locked_until[ip]
+            return 0
+
+    def record_failure(self, ip: str, now: float | None = None) -> int:
+        current = now if now is not None else time.time()
+        with self._lock:
+            cutoff = current - self.window_seconds
+            attempts = [t for t in self._failures.get(ip, []) if t > cutoff]
+            attempts.append(current)
+            self._failures[ip] = attempts
+            if len(attempts) >= self.max_attempts:
+                self._locked_until[ip] = current + self.lockout_seconds
+                self._failures.pop(ip, None)
+                return self.lockout_seconds
+            return 0
+
+    def reset(self, ip: str) -> None:
+        with self._lock:
+            self._failures.pop(ip, None)
+            self._locked_until.pop(ip, None)
