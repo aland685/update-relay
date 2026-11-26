@@ -14,12 +14,12 @@
 
 ## 快速启动
 
-### 方式一：Docker Compose（推荐）
+### 方式一：Docker Compose（直接拉取 GHCR 预构建镜像，推荐）
 
 ```bash
 cp .env.example .env
 # 编辑 .env，务必修改 ADMIN_PASSWORD 与 SESSION_SECRET
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
 
 ### 方式二：Debian VPS 一键脚本（systemd）

@@ -1,6 +1,6 @@
 services:
   update-relay:
-    build: .
+    image: ghcr.io/aland685/update-relay:latest
     container_name: update-relay
     restart: unless-stopped
     env_file:
