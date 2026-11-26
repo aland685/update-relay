@@ -133,91 +133,87 @@
                 {% else %}
                 <span class="badge badge-off">已禁用</span>
                 {% endif %}
+                {% if r.latest_tag %}
+                <span class="mono" style="color: var(--text-muted);">{{ r.latest_tag }}</span>
+                {% endif %}
               </div>
-              {% if r.note %}
-              <div class="hint">{{ r.note }}</div>
-              {% endif %}
+              <div class="repo-meta-line">
+                {% if r.note %}
+                <span>{{ r.note }}</span>
+                <span>·</span>
+                {% endif %}
+                {% if r.latest_tag %}
+                  {% if r.meta_ttl_remaining > 0 %}
+                  <span>元数据剩余 {{ r.meta_ttl_remaining }}s</span>
+                  {% else %}
+                  <span>元数据已过期（下次请求自动更新）</span>
+                  {% endif %}
+                {% else %}
+                <span>尚未拉取元数据</span>
+                {% endif %}
+              </div>
             </div>
 
             <div class="action-group">
-              <button type="button" class="btn-sm btn-outline-primary copy-btn" data-copy="{{ r.api_url }}">复制 API</button>
-              <button type="button" class="btn-sm btn-outline-primary refresh-btn" data-repo="{{ r.repo }}">刷新元数据</button>
               <button
                 type="button"
-                class="btn-sm toggle-btn"
-                data-repo="{{ r.repo }}"
-                data-next="{{ 'false' if r.enabled else 'true' }}"
-              >{{ '禁用' if r.enabled else '启用' }}</button>
-              <button type="button" class="btn-sm purge-repo-btn" data-repo="{{ r.repo }}">清缓存</button>
-              <button type="button" class="btn-sm btn-danger delete-repo-btn" data-repo="{{ r.repo }}">删除</button>
+                class="btn-sm btn-outline-primary toggle-details-btn"
+                aria-expanded="false"
+                aria-controls="details-{{ loop.index }}"
+              >资产详情 ({{ r.merged_assets | length }})</button>
+              <button type="button" class="btn-sm copy-btn" data-copy="{{ r.api_url }}">复制 API</button>
+              <button type="button" class="btn-sm refresh-btn" data-repo="{{ r.repo }}">刷新</button>
+              <details class="more-menu">
+                <summary class="btn btn-sm">更多 ▾</summary>
+                <div class="more-menu-list">
+                  <button
+                    type="button"
+                    class="btn-sm toggle-btn"
+                    data-repo="{{ r.repo }}"
+                    data-next="{{ 'false' if r.enabled else 'true' }}"
+                  >{{ '禁用仓库' if r.enabled else '启用仓库' }}</button>
+                  <button type="button" class="btn-sm purge-repo-btn" data-repo="{{ r.repo }}">清理缓存</button>
+                  <button type="button" class="btn-sm btn-danger delete-repo-btn" data-repo="{{ r.repo }}">删除仓库</button>
+                </div>
+              </details>
             </div>
           </header>
 
-          <div class="repo-card-body">
-            <section class="repo-block" aria-label="最新 Release 资产直链">
-              <div class="repo-block-head">
-                <h4 class="repo-block-title">最新 Release 资产直链</h4>
-                {% if r.latest_tag %}
-                <span class="hint">
-                  <span class="mono">{{ r.latest_tag }}</span> ·
-                  {% if r.meta_ttl_remaining > 0 %}
-                  元数据剩余 {{ r.meta_ttl_remaining }}s
+          <div id="details-{{ loop.index }}" class="repo-details-panel" hidden>
+            {% if r.merged_assets %}
+            <ul class="unified-asset-list">
+              {% for item in r.merged_assets %}
+              <li class="unified-asset-row">
+                <div class="asset-info">
+                  <span class="asset-name" title="{{ item.tag }} / {{ item.name }}">
+                    {% if item.is_legacy_tag %}[{{ item.tag }}] {% endif %}{{ item.name }}
+                  </span>
+                  {% if item.cached %}
+                  <span class="cache-pill cache-pill-hit">
+                    已缓存 · {{ item.cached.size_human }} · 剩余 {{ (item.cached.ttl_remaining_seconds // 60) }} 分钟 ({{ item.cached.ttl_remaining_seconds }}s)
+                  </span>
                   {% else %}
-                  已过期（下次请求自动更新）
+                  <span class="cache-pill cache-pill-miss">未缓存（按需拉取）</span>
                   {% endif %}
-                </span>
-                {% else %}
-                <span class="hint">尚未拉取</span>
-                {% endif %}
-              </div>
-
-              {% if r.assets_preview %}
-              <ul class="asset-list">
-                {% for a in r.assets_preview %}
-                <li class="asset-row">
-                  <span class="asset-name" title="{{ a.name }}">{{ a.name }}</span>
-                  <button type="button" class="btn-sm copy-btn" data-copy="{{ a.download_url }}">复制直链</button>
-                </li>
-                {% endfor %}
-              </ul>
-              {% elif r.latest_tag %}
-              <div class="hint">该 Release 下暂无可分发资产文件。</div>
-              {% else %}
-              <div class="hint">点击右上角「刷新元数据」或等待客户端首次检查更新后展示直链。</div>
-              {% endif %}
-            </section>
-
-            <section class="repo-block" aria-label="本地已缓存文件">
-              <div class="repo-block-head">
-                <h4 class="repo-block-title">本地已缓存文件</h4>
-                <span class="hint">{{ r.cached_files | length }} 个文件</span>
-              </div>
-
-              {% if r.cached_files %}
-              <ul class="file-list">
-                {% for f in r.cached_files %}
-                <li class="file-item">
-                  <div class="file-meta">
-                    <span class="file-name" title="{{ f.tag }} / {{ f.filename }}">{{ f.tag }} / {{ f.filename }}</span>
-                    <span class="file-sub">{{ f.size_human }} · 剩余 {{ (f.ttl_remaining_seconds // 60) }} 分钟 ({{ f.ttl_remaining_seconds }}s)</span>
-                  </div>
-                  <div class="action-group">
-                    <button type="button" class="btn-sm copy-btn" data-copy="{{ f.download_url }}">复制直链</button>
-                    <button
-                      type="button"
-                      class="btn-sm btn-danger del-file-btn"
-                      data-repo="{{ r.repo }}"
-                      data-tag="{{ f.tag }}"
-                      data-filename="{{ f.filename }}"
-                    >删除</button>
-                  </div>
-                </li>
-                {% endfor %}
-              </ul>
-              {% else %}
-              <div class="hint">暂无本地文件缓存（首次下载时按需缓存）。</div>
-              {% endif %}
-            </section>
+                </div>
+                <div class="action-group">
+                  <button type="button" class="btn-sm copy-btn" data-copy="{{ item.download_url }}">复制直链</button>
+                  {% if item.cached %}
+                  <button
+                    type="button"
+                    class="btn-sm btn-danger del-file-btn"
+                    data-repo="{{ r.repo }}"
+                    data-tag="{{ item.tag }}"
+                    data-filename="{{ item.name }}"
+                  >删除缓存</button>
+                  {% endif %}
+                </div>
+              </li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <div class="hint">暂无资产信息，可点击「刷新」拉取最新 Release 列表。</div>
+            {% endif %}
           </div>
         </article>
         {% endfor %}
@@ -371,6 +367,16 @@
     document.getElementById('repos-list').addEventListener('click', async (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
+
+      if (btn.classList.contains('toggle-details-btn')) {
+        const panel = document.getElementById(btn.getAttribute('aria-controls'));
+        const card = btn.closest('.repo-card');
+        const expanded = btn.getAttribute('aria-expanded') === 'true';
+        btn.setAttribute('aria-expanded', String(!expanded));
+        panel.hidden = expanded;
+        card.classList.toggle('is-open', !expanded);
+        return;
+      }
 
       if (btn.classList.contains('copy-btn')) {
         try {

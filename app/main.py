@@ -180,10 +180,15 @@ def create_app(
         enriched_repos: list[dict[str, Any]] = []
         for r in repos:
             repo_name = r["repo"]
+            repo_files = files_by_repo.get(repo_name.lower(), [])
+            cached_map: dict[tuple[str, str], dict[str, Any]] = {
+                (f["tag"], f["filename"]): f for f in repo_files
+            }
             cached_latest = app.state.storage.get_release_cache(repo_name, "__latest__")
             latest_tag = None
             meta_ttl_remaining = 0
             assets_preview: list[dict[str, str]] = []
+            merged_assets: list[dict[str, Any]] = []
             if cached_latest is not None:
                 payload, fetched_at = cached_latest
                 latest_tag = str(payload.get("tag_name") or "").strip() or None
@@ -195,12 +200,29 @@ def create_app(
                     for asset in payload.get("assets") or []:
                         if isinstance(asset, dict) and asset.get("name"):
                             aname = str(asset["name"])
-                            assets_preview.append(
+                            dl_url = f"{base_url}/dl/{repo_name}/{encoded_tag}/{quote(aname, safe='')}"
+                            assets_preview.append({"name": aname, "download_url": dl_url})
+                            matched_cache = cached_map.pop((latest_tag, aname), None)
+                            merged_assets.append(
                                 {
+                                    "tag": latest_tag,
                                     "name": aname,
-                                    "download_url": f"{base_url}/dl/{repo_name}/{encoded_tag}/{quote(aname, safe='')}",
+                                    "download_url": dl_url,
+                                    "cached": matched_cache,
+                                    "is_legacy_tag": False,
                                 }
                             )
+
+            for leftover in cached_map.values():
+                merged_assets.append(
+                    {
+                        "tag": leftover["tag"],
+                        "name": leftover["filename"],
+                        "download_url": leftover["download_url"],
+                        "cached": leftover,
+                        "is_legacy_tag": True,
+                    }
+                )
 
             enriched_repos.append(
                 {
@@ -209,8 +231,9 @@ def create_app(
                     "latest_tag": latest_tag,
                     "meta_ttl_remaining": meta_ttl_remaining,
                     "api_url": f"{base_url}/repos/{repo_name}/releases/latest",
-                    "cached_files": files_by_repo.get(repo_name.lower(), []),
+                    "cached_files": repo_files,
                     "assets_preview": assets_preview,
+                    "merged_assets": merged_assets,
                 }
             )
 
