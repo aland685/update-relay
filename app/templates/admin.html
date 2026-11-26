@@ -113,107 +113,114 @@
       </form>
     </section>
 
-    <section aria-labelledby="repos-table-caption">
-      <div tabindex="0" role="region" aria-labelledby="repos-table-caption" class="table-wrapper">
-        <table>
-          <caption id="repos-table-caption" style="text-align: left; padding: 0.75rem 0.875rem; font-weight: 600;">
-            白名单项目与缓存状态
-          </caption>
-          <thead>
-            <tr>
-              <th>仓库与接口</th>
-              <th>状态</th>
-              <th>最新缓存版本</th>
-              <th>已缓存文件（1 小时自动过期）</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="repos-tbody">
-            {% if not repos %}
-            <tr>
-              <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">
-                暂无白名单仓库，请在上方添加 `owner/repo`。
-              </td>
-            </tr>
-            {% endif %}
-            {% for r in repos %}
-            <tr data-repo="{{ r.repo }}">
-              <th>
-                <div style="font-size: 0.95rem;">{{ r.repo }}</div>
-                {% if r.note %}
-                <div class="hint">{{ r.note }}</div>
-                {% endif %}
-                <div style="margin-block-start: 0.4rem;">
-                  <button type="button" class="btn-sm copy-btn" data-copy="{{ r.api_url }}">复制检查更新 API</button>
-                </div>
-              </th>
-              <td>
+    <section aria-labelledby="repos-list-heading">
+      <h2 id="repos-list-heading" class="section-heading">白名单项目与缓存状态</h2>
+      <div id="repos-list" class="repo-list">
+        {% if not repos %}
+        <div class="empty-state">
+          暂无白名单仓库，请在上方添加 <span class="mono">owner/repo</span>。
+        </div>
+        {% endif %}
+
+        {% for r in repos %}
+        <article class="repo-card" data-repo="{{ r.repo }}">
+          <header class="repo-card-header">
+            <div class="repo-identity">
+              <div class="repo-title-row">
+                <h3 class="repo-name">{{ r.repo }}</h3>
                 {% if r.enabled %}
                 <span class="badge badge-on">已启用</span>
                 {% else %}
                 <span class="badge badge-off">已禁用</span>
                 {% endif %}
-              </td>
-              <td>
+              </div>
+              {% if r.note %}
+              <div class="hint">{{ r.note }}</div>
+              {% endif %}
+            </div>
+
+            <div class="action-group">
+              <button type="button" class="btn-sm btn-outline-primary copy-btn" data-copy="{{ r.api_url }}">复制 API</button>
+              <button type="button" class="btn-sm btn-outline-primary refresh-btn" data-repo="{{ r.repo }}">刷新元数据</button>
+              <button
+                type="button"
+                class="btn-sm toggle-btn"
+                data-repo="{{ r.repo }}"
+                data-next="{{ 'false' if r.enabled else 'true' }}"
+              >{{ '禁用' if r.enabled else '启用' }}</button>
+              <button type="button" class="btn-sm purge-repo-btn" data-repo="{{ r.repo }}">清缓存</button>
+              <button type="button" class="btn-sm btn-danger delete-repo-btn" data-repo="{{ r.repo }}">删除</button>
+            </div>
+          </header>
+
+          <div class="repo-card-body">
+            <section class="repo-block" aria-label="最新 Release 资产直链">
+              <div class="repo-block-head">
+                <h4 class="repo-block-title">最新 Release 资产直链</h4>
                 {% if r.latest_tag %}
-                <div class="mono">{{ r.latest_tag }}</div>
-                <div class="hint">元数据剩余 {{ r.meta_ttl_remaining }}s</div>
-                {% if r.assets_preview %}
-                <div class="action-group" style="margin-block-start: 0.35rem;">
-                  {% for a in r.assets_preview[:3] %}
-                  <button type="button" class="btn-sm copy-btn" data-copy="{{ a.download_url }}" title="复制 {{ a.name }} 加速链接">
-                    复制 {{ a.name }}
-                  </button>
-                  {% endfor %}
-                </div>
-                {% endif %}
+                <span class="hint">
+                  <span class="mono">{{ r.latest_tag }}</span> ·
+                  {% if r.meta_ttl_remaining > 0 %}
+                  元数据剩余 {{ r.meta_ttl_remaining }}s
+                  {% else %}
+                  已过期（下次请求自动更新）
+                  {% endif %}
+                </span>
                 {% else %}
                 <span class="hint">尚未拉取</span>
                 {% endif %}
-              </td>
-              <td>
-                {% if r.cached_files %}
-                <ul class="file-list">
-                  {% for f in r.cached_files %}
-                  <li class="file-item">
-                    <div class="file-meta">
-                      <span class="file-name">{{ f.tag }} / {{ f.filename }}</span>
-                      <span class="file-sub">{{ f.size_human }} · 剩余 {{ (f.ttl_remaining_seconds // 60) }} 分钟 ({{ f.ttl_remaining_seconds }}s)</span>
-                    </div>
-                    <div class="action-group">
-                      <button type="button" class="btn-sm copy-btn" data-copy="{{ f.download_url }}">复制直链</button>
-                      <button
-                        type="button"
-                        class="btn-sm btn-danger del-file-btn"
-                        data-repo="{{ r.repo }}"
-                        data-tag="{{ f.tag }}"
-                        data-filename="{{ f.filename }}"
-                      >删除</button>
-                    </div>
-                  </li>
-                  {% endfor %}
-                </ul>
-                {% else %}
-                <span class="hint">暂无本地文件缓存</span>
-                {% endif %}
-              </td>
-              <td>
-                <div class="action-group">
-                  <button
-                    type="button"
-                    class="btn-sm toggle-btn"
-                    data-repo="{{ r.repo }}"
-                    data-next="{{ 'false' if r.enabled else 'true' }}"
-                  >{{ '禁用' if r.enabled else '启用' }}</button>
-                  <button type="button" class="btn-sm refresh-btn" data-repo="{{ r.repo }}">刷新元数据</button>
-                  <button type="button" class="btn-sm purge-repo-btn" data-repo="{{ r.repo }}">清缓存</button>
-                  <button type="button" class="btn-sm btn-danger delete-repo-btn" data-repo="{{ r.repo }}">删除</button>
-                </div>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+              </div>
+
+              {% if r.assets_preview %}
+              <ul class="asset-list">
+                {% for a in r.assets_preview %}
+                <li class="asset-row">
+                  <span class="asset-name" title="{{ a.name }}">{{ a.name }}</span>
+                  <button type="button" class="btn-sm copy-btn" data-copy="{{ a.download_url }}">复制直链</button>
+                </li>
+                {% endfor %}
+              </ul>
+              {% elif r.latest_tag %}
+              <div class="hint">该 Release 下暂无可分发资产文件。</div>
+              {% else %}
+              <div class="hint">点击右上角「刷新元数据」或等待客户端首次检查更新后展示直链。</div>
+              {% endif %}
+            </section>
+
+            <section class="repo-block" aria-label="本地已缓存文件">
+              <div class="repo-block-head">
+                <h4 class="repo-block-title">本地已缓存文件</h4>
+                <span class="hint">{{ r.cached_files | length }} 个文件</span>
+              </div>
+
+              {% if r.cached_files %}
+              <ul class="file-list">
+                {% for f in r.cached_files %}
+                <li class="file-item">
+                  <div class="file-meta">
+                    <span class="file-name" title="{{ f.tag }} / {{ f.filename }}">{{ f.tag }} / {{ f.filename }}</span>
+                    <span class="file-sub">{{ f.size_human }} · 剩余 {{ (f.ttl_remaining_seconds // 60) }} 分钟 ({{ f.ttl_remaining_seconds }}s)</span>
+                  </div>
+                  <div class="action-group">
+                    <button type="button" class="btn-sm copy-btn" data-copy="{{ f.download_url }}">复制直链</button>
+                    <button
+                      type="button"
+                      class="btn-sm btn-danger del-file-btn"
+                      data-repo="{{ r.repo }}"
+                      data-tag="{{ f.tag }}"
+                      data-filename="{{ f.filename }}"
+                    >删除</button>
+                  </div>
+                </li>
+                {% endfor %}
+              </ul>
+              {% else %}
+              <div class="hint">暂无本地文件缓存（首次下载时按需缓存）。</div>
+              {% endif %}
+            </section>
+          </div>
+        </article>
+        {% endfor %}
       </div>
     </section>
   </main>
@@ -361,7 +368,7 @@
       });
     });
 
-    document.getElementById('repos-tbody').addEventListener('click', async (e) => {
+    document.getElementById('repos-list').addEventListener('click', async (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
 
