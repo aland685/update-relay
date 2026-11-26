@@ -273,3 +273,36 @@ def test_one_hour_expiration_and_lru_cleanup(tmp_path: Path) -> None:
     res_exp = cleanup_once(storage, cfg, now=time.time() + 3601)
     assert res_exp["expired_removed"] == 1
     assert not p2.exists()
+
+
+@pytest.mark.asyncio
+async def test_runtime_settings_update_and_persistence(tmp_path: Path) -> None:
+    cfg = _make_settings(tmp_path, max_cache_mb=2048, cache_ttl_seconds=3600)
+    app = create_app(settings=cfg)
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            headers = {"Authorization": f"Bearer {cfg.admin_password}"}
+            r = await client.put(
+                "/api/admin/settings",
+                headers=headers,
+                json={
+                    "max_cache_mb": 512,
+                    "cache_ttl_seconds": 1800,
+                    "cache_ttl_mode": "fixed",
+                    "cleanup_interval_seconds": 60,
+                    "metadata_ttl_seconds": 120,
+                },
+            )
+            assert r.status_code == 200
+            assert app.state.settings.max_cache_mb == 512
+            assert app.state.settings.cache_ttl_seconds == 1800
+            assert app.state.settings.cache_ttl_mode == "fixed"
+
+    # 模拟重启后从 SQLite 恢复配置
+    app2 = create_app(settings=cfg)
+    async with app2.router.lifespan_context(app2):
+        assert app2.state.settings.max_cache_mb == 512
+        assert app2.state.settings.cache_ttl_seconds == 1800
+        assert app2.state.settings.cache_ttl_mode == "fixed"
+

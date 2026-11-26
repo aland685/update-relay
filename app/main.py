@@ -65,6 +65,14 @@ class ToggleRequest(BaseModel):
     enabled: bool
 
 
+class RuntimeSettingsRequest(BaseModel):
+    max_cache_mb: int
+    cache_ttl_seconds: int
+    cache_ttl_mode: str
+    cleanup_interval_seconds: int
+    metadata_ttl_seconds: int
+
+
 def _format_bytes(num: int) -> str:
     if num < 1024:
         return f"{num} B"
@@ -92,7 +100,8 @@ def create_app(
             follow_redirects=True,
             timeout=httpx.Timeout(cfg.upstream_timeout_seconds, connect=20.0),
         )
-        app.state.settings = cfg
+        effective_cfg = cfg.with_overrides(storage.get_app_settings())
+        app.state.settings = effective_cfg
         app.state.storage = storage
         app.state.singleflight = singleflight
         app.state.http_client = client
@@ -100,8 +109,9 @@ def create_app(
         async def _cleanup_loop() -> None:
             while True:
                 try:
-                    await asyncio.sleep(cfg.cleanup_interval_seconds)
-                    cleanup_once(storage, cfg)
+                    interval = app.state.settings.cleanup_interval_seconds
+                    await asyncio.sleep(interval)
+                    cleanup_once(storage, app.state.settings)
                 except asyncio.CancelledError:
                     break
                 except Exception as exc:
@@ -110,11 +120,11 @@ def create_app(
         cleanup_task = asyncio.create_task(_cleanup_loop())
         logger.info(
             "Update Relay 已启动: %s:%s | TTL=%ds (%s) | 上限=%d MB",
-            cfg.host,
-            cfg.port,
-            cfg.cache_ttl_seconds,
-            cfg.cache_ttl_mode,
-            cfg.max_cache_mb,
+            effective_cfg.host,
+            effective_cfg.port,
+            effective_cfg.cache_ttl_seconds,
+            effective_cfg.cache_ttl_mode,
+            effective_cfg.max_cache_mb,
         )
         try:
             yield
@@ -203,6 +213,13 @@ def create_app(
 
         return {
             "stats": get_cache_stats(app.state.storage, app.state.settings),
+            "settings": {
+                "max_cache_mb": app.state.settings.max_cache_mb,
+                "cache_ttl_seconds": app.state.settings.cache_ttl_seconds,
+                "cache_ttl_mode": app.state.settings.cache_ttl_mode,
+                "cleanup_interval_seconds": app.state.settings.cleanup_interval_seconds,
+                "metadata_ttl_seconds": app.state.settings.metadata_ttl_seconds,
+            },
             "repos": enriched_repos,
             "base_url": base_url,
         }
@@ -371,6 +388,51 @@ def create_app(
     async def api_purge_all(_admin: str = Depends(require_admin)):
         removed = purge_all_cache(app.state.storage, app.state.settings)
         return {"ok": True, "removed_files": removed}
+
+    @app.post("/api/admin/cache/cleanup")
+    async def api_run_cleanup(_admin: str = Depends(require_admin)):
+        res = cleanup_once(app.state.storage, app.state.settings)
+        return {"ok": True, **res}
+
+    @app.get("/api/admin/settings")
+    async def api_get_settings(_admin: str = Depends(require_admin)):
+        s = app.state.settings
+        return {
+            "max_cache_mb": s.max_cache_mb,
+            "cache_ttl_seconds": s.cache_ttl_seconds,
+            "cache_ttl_mode": s.cache_ttl_mode,
+            "cleanup_interval_seconds": s.cleanup_interval_seconds,
+            "metadata_ttl_seconds": s.metadata_ttl_seconds,
+        }
+
+    @app.put("/api/admin/settings")
+    async def api_update_settings(
+        body: RuntimeSettingsRequest,
+        _admin: str = Depends(require_admin),
+    ):
+        mode = body.cache_ttl_mode.strip().lower()
+        if mode not in ("sliding", "fixed"):
+            raise HTTPException(status_code=400, detail="cache_ttl_mode 必须为 sliding 或 fixed")
+        if body.max_cache_mb < 10:
+            raise HTTPException(status_code=400, detail="缓存容量上限不能小于 10 MB")
+        if body.cache_ttl_seconds < 10:
+            raise HTTPException(status_code=400, detail="文件缓存时间不能小于 10 秒")
+        if body.cleanup_interval_seconds < 10:
+            raise HTTPException(status_code=400, detail="清理扫描间隔不能小于 10 秒")
+        if body.metadata_ttl_seconds < 5:
+            raise HTTPException(status_code=400, detail="元数据缓存时间不能小于 5 秒")
+
+        updates = {
+            "max_cache_mb": str(body.max_cache_mb),
+            "cache_ttl_seconds": str(body.cache_ttl_seconds),
+            "cache_ttl_mode": mode,
+            "cleanup_interval_seconds": str(body.cleanup_interval_seconds),
+            "metadata_ttl_seconds": str(body.metadata_ttl_seconds),
+        }
+        app.state.storage.set_app_settings(updates)
+        app.state.settings = app.state.settings.with_overrides(updates)
+        cleanup_res = cleanup_once(app.state.storage, app.state.settings)
+        return {"ok": True, "cleanup": cleanup_res}
 
     # ---- 对外中转接口：GitHub Releases API 兼容 ----
 

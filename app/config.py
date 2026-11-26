@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 
@@ -96,4 +96,31 @@ class Settings:
             cleanup_interval_seconds=_env_int("CLEANUP_INTERVAL_SECONDS", 300, minimum=10),
             max_cache_mb=_env_int("MAX_CACHE_MB", 2048, minimum=10),
             upstream_timeout_seconds=_env_int("UPSTREAM_TIMEOUT_SECONDS", 300, minimum=10),
+        )
+
+    def with_overrides(self, overrides: dict[str, str]) -> "Settings":
+        """应用持久化在数据库中的运行时配置覆盖项。"""
+        if not overrides:
+            return self
+
+        def _int_val(key: str, current: int, minimum: int) -> int:
+            raw = overrides.get(key)
+            if raw is None or raw == "":
+                return current
+            try:
+                return max(minimum, int(raw))
+            except ValueError:
+                return current
+
+        ttl_mode = str(overrides.get("cache_ttl_mode", self.cache_ttl_mode)).strip().lower()
+        if ttl_mode not in ("sliding", "fixed"):
+            ttl_mode = self.cache_ttl_mode
+
+        return replace(
+            self,
+            metadata_ttl_seconds=_int_val("metadata_ttl_seconds", self.metadata_ttl_seconds, 5),
+            cache_ttl_seconds=_int_val("cache_ttl_seconds", self.cache_ttl_seconds, 10),
+            cache_ttl_mode=ttl_mode,
+            cleanup_interval_seconds=_int_val("cleanup_interval_seconds", self.cleanup_interval_seconds, 10),
+            max_cache_mb=_int_val("max_cache_mb", self.max_cache_mb, 10),
         )

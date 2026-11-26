@@ -56,6 +56,12 @@ class RelayStorage:
                     last_accessed_at REAL NOT NULL,
                     PRIMARY KEY (repo, tag, filename)
                 );
+
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at REAL NOT NULL
+                );
                 """
             )
 
@@ -247,3 +253,25 @@ class RelayStorage:
             ).fetchall()
             conn.execute("DELETE FROM cached_files WHERE repo = ? COLLATE NOCASE", (repo,))
             return [dict(r) for r in rows]
+
+    # ---- 运行时动态配置 ----
+
+    def get_app_settings(self) -> dict[str, str]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute("SELECT key, value FROM app_settings").fetchall()
+            return {r["key"]: r["value"] for r in rows}
+
+    def set_app_settings(self, updates: dict[str, str]) -> None:
+        now = time.time()
+        with self._lock, self._connect() as conn:
+            for key, value in updates.items():
+                conn.execute(
+                    """
+                    INSERT INTO app_settings (key, value, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        updated_at = excluded.updated_at
+                    """,
+                    (key, str(value), now),
+                )

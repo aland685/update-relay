@@ -45,6 +45,39 @@
       </div>
     </section>
 
+    <section class="panel" aria-labelledby="policy-heading">
+      <h2 id="policy-heading" style="margin: 0 0 0.875rem; font-size: 1rem;">缓存容量与清理策略设置</h2>
+      <form id="policy-form" class="form-row">
+        <div class="field" style="flex: 1 1 150px;">
+          <label for="max-cache-mb">缓存磁盘上限（MB）</label>
+          <input type="number" id="max-cache-mb" name="max_cache_mb" min="10" step="1" value="{{ settings.max_cache_mb }}" required>
+        </div>
+        <div class="field" style="flex: 1 1 160px;">
+          <label for="cache-ttl-min">文件保留时长（分钟）</label>
+          <input type="number" id="cache-ttl-min" name="cache_ttl_min" min="1" step="1" value="{{ (settings.cache_ttl_seconds // 60) or 1 }}" required>
+        </div>
+        <div class="field" style="flex: 1 1 160px;">
+          <label for="cache-ttl-mode">过期计时模式</label>
+          <select id="cache-ttl-mode" name="cache_ttl_mode">
+            <option value="sliding" {{ 'selected' if settings.cache_ttl_mode == 'sliding' else '' }}>滑动续期（命中刷新）</option>
+            <option value="fixed" {{ 'selected' if settings.cache_ttl_mode == 'fixed' else '' }}>固定过期（首次拉取起算）</option>
+          </select>
+        </div>
+        <div class="field" style="flex: 1 1 150px;">
+          <label for="cleanup-interval">扫描间隔（秒）</label>
+          <input type="number" id="cleanup-interval" name="cleanup_interval_seconds" min="10" step="10" value="{{ settings.cleanup_interval_seconds }}" required>
+        </div>
+        <div class="field" style="flex: 1 1 150px;">
+          <label for="metadata-ttl">元数据缓存（秒）</label>
+          <input type="number" id="metadata-ttl" name="metadata_ttl_seconds" min="5" step="5" value="{{ settings.metadata_ttl_seconds }}" required>
+        </div>
+        <div class="action-group">
+          <button type="submit" class="btn-primary" id="save-policy-btn">保存策略</button>
+          <button type="button" id="run-cleanup-btn">立即清理</button>
+        </div>
+      </form>
+    </section>
+
     <section class="panel" aria-labelledby="add-repo-heading">
       <h2 id="add-repo-heading" style="margin: 0 0 0.875rem; font-size: 1rem;">添加白名单仓库</h2>
       <form id="add-repo-form" class="form-row" novalidate>
@@ -268,6 +301,43 @@
     });
 
     document.getElementById('refresh-all-btn').addEventListener('click', () => location.reload());
+
+    // 保存缓存与清理策略
+    const policyForm = document.getElementById('policy-form');
+    const savePolicyBtn = document.getElementById('save-policy-btn');
+    policyForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      savePolicyBtn.disabled = true;
+      try {
+        const ttlMinutes = Math.max(1, Number(document.getElementById('cache-ttl-min').value));
+        const res = await apiCall('/api/admin/settings', {
+          method: 'PUT',
+          body: JSON.stringify({
+            max_cache_mb: Number(document.getElementById('max-cache-mb').value),
+            cache_ttl_seconds: Math.round(ttlMinutes * 60),
+            cache_ttl_mode: document.getElementById('cache-ttl-mode').value,
+            cleanup_interval_seconds: Number(document.getElementById('cleanup-interval').value),
+            metadata_ttl_seconds: Number(document.getElementById('metadata-ttl').value),
+          }),
+        });
+        showToast('策略已保存并生效');
+        setTimeout(() => location.reload(), 500);
+      } catch (err) {
+        showToast(err.message);
+      } finally {
+        savePolicyBtn.disabled = false;
+      }
+    });
+
+    document.getElementById('run-cleanup-btn').addEventListener('click', async () => {
+      try {
+        const res = await apiCall('/api/admin/cache/cleanup', { method: 'POST' });
+        showToast(`扫描完成：过期 ${res.expired_removed} 个，LRU 淘汰 ${res.lru_removed} 个`);
+        setTimeout(() => location.reload(), 600);
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
 
     document.getElementById('purge-all-btn').addEventListener('click', () => {
       askConfirm('清理全部缓存', '确定要删除所有已缓存的 Release 文件和元数据吗？', async () => {
