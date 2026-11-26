@@ -364,9 +364,41 @@
       });
     });
 
+    // 「更多」下拉菜单：支持点击外部、Esc、点击菜单项及鼠标移开自动收起
+    const moreMenus = () => Array.from(document.querySelectorAll('details.more-menu'));
+    document.addEventListener('click', (e) => {
+      for (const m of moreMenus()) {
+        if (m.open && !m.contains(e.target)) m.open = false;
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        for (const m of moreMenus()) m.open = false;
+      }
+    });
+    for (const m of moreMenus()) {
+      let leaveTimer = null;
+      m.addEventListener('toggle', () => {
+        if (m.open) {
+          for (const other of moreMenus()) {
+            if (other !== m) other.open = false;
+          }
+        }
+      });
+      m.addEventListener('mouseleave', () => {
+        if (!m.open) return;
+        leaveTimer = setTimeout(() => { m.open = false; }, 180);
+      });
+      m.addEventListener('mouseenter', () => {
+        clearTimeout(leaveTimer);
+      });
+    }
+
     document.getElementById('repos-list').addEventListener('click', async (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
+      const parentMenu = btn.closest('details.more-menu');
+      if (parentMenu) parentMenu.open = false;
 
       if (btn.classList.contains('toggle-details-btn')) {
         const panel = document.getElementById(btn.getAttribute('aria-controls'));
